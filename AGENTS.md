@@ -2,15 +2,15 @@
 
 ## Project Structure & Module Organization
 
-This repository is at its foundation stage. See `docs/PROJECT_CHARTER.md` for project design; no application package or tests exist yet. The planned layout is `src/nisar_isnobal_da/` for Python modules, `scripts/` for workflows, `config/` for experiment settings, and `tests/` for unit, invariant, and integration checks. Keep design and data contracts in `docs/`. Store only manifests, inventories, compact provenance, frozen configuration, and small fixtures in Git; raw and derived datasets belong outside version control (`data/raw/`, `data/external/`, and `data/derived/` are ignored).
+See `docs/PROJECT_CHARTER.md` for the project design and `docs/` for its concise operational contracts. The Python package uses the `src/nisar_isnobal_da/` layout; the current package is only a scaffold. The initial smoke test is under `tests/unit/`. Future code may add focused modules, scripts, configurations, and tests as their project stages begin. Store only manifests, inventories, compact provenance, frozen configuration, and small fixtures in Git; raw and derived datasets belong outside version control (`data/raw/`, `data/external/`, and `data/derived/` are ignored).
 
 ## Build, Test, and Development Commands
 
-There is no build configuration or runnable test suite yet. Use `git status --short` to review changes and `rg --files` to inspect project content. As the Python scaffold is added, follow the charter’s planned tools: `pytest` for tests and `ruff check .` for linting. Document exact setup and run commands when configuration exists.
+Use Python 3.12. From the repository root, create and activate an environment with `python3.12 -m venv .venv` and `source .venv/bin/activate`, then install the development package with `python -m pip install -e ".[dev]"`. Run `ruff check .`, `ruff format --check .`, and `pytest`. Use `git status --short` to review changes and `rg --files` to inspect project content.
 
 ## Coding Style & Naming Conventions
 
-Use Python for new package and workflow code. Follow standard Python naming: `snake_case` for modules, functions, and variables; `PascalCase` for classes; descriptive experiment IDs such as `N0` and `ASO-DA` as defined in the charter. Keep scientific choices explicit in configuration and provenance. Prefer small, focused modules aligned with the planned boundaries: observations, model, assimilation, uncertainty, evaluation, experiments, and I/O.
+Use Python for package and workflow code. Follow standard Python naming: `snake_case` for modules, functions, and variables; `PascalCase` for classes; descriptive experiment IDs such as `N0` and `ASO-DA` as defined in the charter. Ruff enforces the configured E, F, and I rules and formatting. Keep scientific choices explicit in configuration and provenance. Future modules should follow the planned boundaries: observations, model, assimilation, uncertainty, evaluation, experiments, and I/O.
 
 ## Scientific and Data Contracts
 
@@ -18,7 +18,7 @@ Preserve the charter’s observation meaning: `dSWE = SWE(secondary) - SWE(refer
 
 ## Testing Guidelines
 
-When tests are introduced, put them under the corresponding `tests/` subdirectory and use `test_*.py` names. Cover invariants as well as outputs, especially missing-support handling, mass changes, and physical restart-state validity. Keep fixtures small and synthetic; never commit large scientific data products.
+Put tests under the corresponding `tests/` subdirectory and use `test_*.py` names. The current package-import smoke test checks scaffolding only. As scientific code is added, cover its stated invariants as well as outputs; keep fixtures small and synthetic, and never commit large scientific data products.
 
 ## Commit & Pull Request Guidelines
 

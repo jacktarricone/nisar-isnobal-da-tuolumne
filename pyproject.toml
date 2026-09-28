@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nisar-isnobal-da-tuolumne"
+version = "0.1.0"
+description = "NISAR and iSnobal data-assimilation research for the Tuolumne Basin"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["xarray"]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+inventory = ["h5py", "rasterio", "shapely"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra --strict-config --strict-markers"

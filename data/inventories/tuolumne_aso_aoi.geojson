@@ -1,0 +1,47 @@
+{
+  "type": "FeatureCollection",
+  "name": "tuolumne_aso_swe_footprint_union",
+  "properties": {
+    "created_utc": "2026-09-28T20:13:50Z",
+    "source": "union of source SWE GeoTIFF rectangular bounds",
+    "source_rasters": [
+      "/Users/jtarrico/ch13_nisar_prelim/data/rasters/aso/ca/tuo/ASO_Tuolumne_2026Jan31-Feb01_AllData_and_Reports/ASO_Tuolumne_2026Jan31-Feb01_swe_50m.tif",
+      "/Users/jtarrico/ch13_nisar_prelim/data/rasters/aso/ca/tuo/ASO_Tuolumne_2026Feb27-28_SurveyData_and_Reports/ASO_Tuolumne_2026Feb27-28_swe_50m.tif",
+      "/Users/jtarrico/ch13_nisar_prelim/data/rasters/aso/ca/tuo/ASO_Tuolumne_2026Apr06_SurveyData_and_Reports/ASO_Tuolumne_2026Apr06_swe_50m.tif"
+    ],
+    "crs": "EPSG:4326"
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {},
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -120.2654801739,
+              37.7139605003
+            ],
+            [
+              -120.2877968744,
+              38.2156091343
+            ],
+            [
+              -119.2059228103,
+              38.2409466387
+            ],
+            [
+              -119.1909316755,
+              37.738847384
+            ],
+            [
+              -120.2654801739,
+              37.7139605003
+            ]
+          ]
+        ]
+      }
+    }
+  ]
+}
