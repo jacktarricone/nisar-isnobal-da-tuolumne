@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "inventory_created_utc": "2026-09-29T02:21:48+00:00",
+  "path": "data/inventories/tuolumne_basin_boundary.geojson",
+  "source_artifact": "ch13_nisar_prelim/data/vectors/tuolumne.geojson",
+  "sha256": "4e3c4f3fe86f75917e66b71d9ccf52bf77d40eaa8e5da9a67660e9cbbc8703af",
+  "coordinate_reference_system": "EPSG:4326 (GeoJSON longitude/latitude)",
+  "feature_count": 1,
+  "geometry_types": [
+    "Polygon"
+  ],
+  "valid_geometry": true,
+  "role": "Tuolumne basin boundary for station membership and spatial masks",
+  "not_for": "NISAR CMR search AOI; use tuolumne_aso_aoi.geojson for the ASO raster-footprint search geometry"
+}

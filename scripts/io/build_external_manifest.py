@@ -217,6 +217,209 @@ def aso_manifest_rows(path: Path) -> list[dict[str, str]]:
     return rows
 
 
+def cdec_manifest_rows(path: Path) -> list[dict[str, str]]:
+    document = load_json(path)
+    query = document["query"]
+    start = str(query["start_date_inclusive"])
+    end = str(query["end_date_inclusive"])
+    rows: list[dict[str, str]] = []
+    for kind, path_key, checksum_key, units, product, size_key, notes in (
+        (
+            "raw",
+            "raw_csv_path",
+            "raw_csv_sha256",
+            "inches as reported by CDEC",
+            "Daily snow water content, raw CDEC response",
+            "raw_csv_bytes",
+            "Source values and flags retained.",
+        ),
+        (
+            "normalized",
+            "normalized_csv_path",
+            "normalized_csv_sha256",
+            "cm SWE",
+            "Daily snow water content, normalized project series",
+            "",
+            (
+                "Inches converted to centimetres; non-numeric values remain "
+                "missing; no filling or flag filtering."
+            ),
+        ),
+    ):
+        local_path = str(document[path_key])
+        local_file = Path(local_path)
+        file_size = document.get(size_key, "") if size_key else ""
+        if not file_size and local_file.is_file():
+            file_size = local_file.stat().st_size
+        rows.append(
+            {
+                "inventory_created_utc": str(document["downloaded_utc"]),
+                "dataset": "CDEC Tuolumne daily SWE",
+                "provider": str(document["provider"]),
+                "product": product,
+                "maturity": "",
+                "version": "sensor 3 / daily",
+                "collection_version": "",
+                "crid": "",
+                "product_version": "",
+                "identifier": f"sensor 3/{start}_to_{end}/{kind}",
+                "collection_concept_id": "",
+                "granule_concept_id": "",
+                "basin": "Tuolumne River Basin",
+                "track_frame": "",
+                "orbit_direction": "",
+                "acquisition_start": start,
+                "acquisition_end": end,
+                "units": units,
+                "crs": "",
+                "resolution": "daily station observations",
+                "local_expected_path": local_path,
+                "download_method": "CDEC CSV endpoint; raw response retained",
+                "persistent_identifier": "",
+                "study_role": (
+                    "station phase-reference input; not independent validation"
+                ),
+                "independence_category": "calibration/reference input",
+                "checksum_algorithm": "SHA-256",
+                "checksum": str(document[checksum_key]),
+                "file_size_bytes": str(file_size),
+                "source_metadata_uri": str(document["query_url"]),
+                "notes": notes,
+            }
+        )
+    return rows
+
+
+def viirs_manifest_rows(path: Path) -> list[dict[str, str]]:
+    document = load_json(path)
+    rows: list[dict[str, str]] = []
+    for product in document.get("products", []):
+        granule_id = str(product["granule_concept_id"])
+        rows.append(
+            {
+                "inventory_created_utc": str(document["generated_utc"]),
+                "dataset": f"VIIRS {document['short_name']}",
+                "provider": str(document["provider"]),
+                "product": str(document["product"]),
+                "maturity": "",
+                "version": str(document["version"]),
+                "collection_version": str(document["version"]),
+                "crid": "",
+                "product_version": str(document["version"]),
+                "identifier": str(product["granule_native_id"]),
+                "collection_concept_id": str(product["collection_concept_id"]),
+                "granule_concept_id": granule_id,
+                "basin": "Tuolumne River Basin",
+                "track_frame": "",
+                "orbit_direction": "",
+                "acquisition_start": str(product["product_date"]),
+                "acquisition_end": str(product["product_date"]),
+                "units": "NDSI; source scale 0.01",
+                "crs": "",
+                "resolution": "375 m (product title)",
+                "local_expected_path": str(product["local_path"]),
+                "download_method": "earthaccess authenticated download",
+                "persistent_identifier": granule_id,
+                "study_role": (
+                    "downstream snow-cover diagnostic; not a retrieval filter"
+                ),
+                "independence_category": (
+                    "ancillary diagnostic; not a SWE validation target"
+                ),
+                "checksum_algorithm": "SHA-256",
+                "checksum": str(product.get("local_sha256", "")),
+                "file_size_bytes": str(product.get("local_size_bytes", "")),
+                "source_metadata_uri": (
+                    "https://cmr.earthdata.nasa.gov/search/concepts/"
+                    f"{granule_id}.umm_json"
+                ),
+                "notes": (
+                    "Local-file SHA-256 and size recorded in the inventory; "
+                    f"selected CMR revision {product.get('cmr_revision_date', '')}."
+                ),
+            }
+        )
+    if document.get("selected_product_count") != len(rows):
+        raise ValueError(f"VIIRS product count mismatch in {path}")
+    return rows
+
+
+def basin_boundary_manifest_row(path: Path) -> dict[str, str]:
+    document = load_json(path)
+    asset = Path(str(document["path"]))
+    return {
+        "inventory_created_utc": str(document["inventory_created_utc"]),
+        "dataset": "Tuolumne basin boundary",
+        "provider": "User-provided local project artifact",
+        "product": "GeoJSON basin polygon",
+        "maturity": "",
+        "version": "",
+        "collection_version": "",
+        "crid": "",
+        "product_version": "",
+        "identifier": str(document["source_artifact"]),
+        "collection_concept_id": "",
+        "granule_concept_id": "",
+        "basin": "Tuolumne River Basin",
+        "track_frame": "",
+        "orbit_direction": "",
+        "acquisition_start": "",
+        "acquisition_end": "",
+        "units": "",
+        "crs": str(document["coordinate_reference_system"]),
+        "resolution": "vector boundary",
+        "local_expected_path": str(asset),
+        "download_method": "Copied from source artifact recorded in inventory",
+        "persistent_identifier": "",
+        "study_role": "basin mask and station membership; not the CMR search AOI",
+        "independence_category": "",
+        "checksum_algorithm": "SHA-256",
+        "checksum": str(document["sha256"]),
+        "file_size_bytes": str(asset.stat().st_size if asset.is_file() else ""),
+        "source_metadata_uri": "",
+        "notes": str(document["not_for"]),
+    }
+
+
+def dem_manifest_row(path: Path) -> dict[str, str]:
+    document = load_json(path)
+    return {
+        "inventory_created_utc": str(document["inventory_created_utc"]),
+        "dataset": str(document["product"]),
+        "provider": str(document["provider_status"]),
+        "product": "Four-tile Tuolumne DEM mosaic",
+        "maturity": "",
+        "version": "",
+        "collection_version": "",
+        "crid": "",
+        "product_version": "",
+        "identifier": ";".join(document["source_tiles"]),
+        "collection_concept_id": "",
+        "granule_concept_id": "",
+        "basin": "Tuolumne River Basin",
+        "track_frame": "",
+        "orbit_direction": "",
+        "acquisition_start": "",
+        "acquisition_end": "",
+        "units": "m elevation",
+        "crs": str(document["crs"]),
+        "resolution": str(document["resolution"]),
+        "local_expected_path": str(document["path"]),
+        "download_method": "Local mosaic; source-tile transfer details unresolved",
+        "persistent_identifier": "",
+        "study_role": "local-incidence calculation input",
+        "independence_category": "",
+        "checksum_algorithm": "SHA-256",
+        "checksum": str(document["sha256"]),
+        "file_size_bytes": str(document["file_size_bytes"]),
+        "source_metadata_uri": "",
+        "notes": (
+            f"Vertical datum: {document['vertical_datum']}. "
+            "Distributor and download record were not present in local metadata."
+        ),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -235,6 +438,26 @@ def parse_args() -> argparse.Namespace:
         default=Path("data/inventories/tuolumne_nisar_provisional_all.json"),
     )
     parser.add_argument(
+        "--cdec-inventory",
+        type=Path,
+        default=Path("data/inventories/tuolumne_cdec_2025-10-01_to_2026-09-28.json"),
+    )
+    parser.add_argument(
+        "--viirs-inventory",
+        type=Path,
+        default=Path("data/inventories/tuolumne_viirs_2025-11-01_to_2026-09-21.json"),
+    )
+    parser.add_argument(
+        "--boundary-inventory",
+        type=Path,
+        default=Path("data/inventories/tuolumne_basin_boundary.json"),
+    )
+    parser.add_argument(
+        "--dem-inventory",
+        type=Path,
+        default=Path("data/inventories/tuolumne_dem_processing.json"),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("data/manifests/external_data_manifest.csv"),
@@ -244,16 +467,33 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    required = [args.aso_inventory, args.beta_inventory, args.provisional_inventory]
+    required = [
+        args.aso_inventory,
+        args.beta_inventory,
+        args.provisional_inventory,
+        args.cdec_inventory,
+        args.viirs_inventory,
+        args.boundary_inventory,
+        args.dem_inventory,
+    ]
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise SystemExit("Missing source inventory file(s):\n" + "\n".join(missing))
     rows = aso_manifest_rows(args.aso_inventory)
     for path in (args.beta_inventory, args.provisional_inventory):
         rows.extend(nisar_manifest_rows(path, load_json(path)))
+    rows.extend(cdec_manifest_rows(args.cdec_inventory))
+    rows.extend(viirs_manifest_rows(args.viirs_inventory))
+    rows.append(basin_boundary_manifest_row(args.boundary_inventory))
+    rows.append(dem_manifest_row(args.dem_inventory))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=FIELDS, extrasaction="ignore")
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=FIELDS,
+            extrasaction="ignore",
+            lineterminator="\n",
+        )
         writer.writeheader()
         writer.writerows(rows)
     print(f"Wrote {len(rows)} external-data records to {args.output}")

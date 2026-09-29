@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "inventory_created_utc": "2026-09-29T03:53:11+00:00",
+  "path": "data/external/dem/nisar_cop30/tuolumne_four_tile_mosaic.tif",
+  "product": "Modified Copernicus DEM for NISAR",
+  "provider_status": "Distributor/provider not recorded in available local metadata",
+  "source_tiles": [
+    "DEM_N37_00_W121_00_C01.tif",
+    "DEM_N37_00_W120_00_C01.tif",
+    "DEM_N38_00_W121_00_C01.tif",
+    "DEM_N38_00_W120_00_C01.tif"
+  ],
+  "sha256": "93a747b7c44bf8be548e53e8538a2239ff055ec353fcf925d3f022ef094d425b",
+  "file_size_bytes": 173465840,
+  "crs": "EPSG:4326",
+  "transform": [
+    0.0002777777777777778,
+    0.0,
+    -121.00013888888888,
+    0.0,
+    -0.0002777777777777778,
+    39.00013888888889
+  ],
+  "shape": [
+    7200,
+    7200
+  ],
+  "resolution": [
+    0.0002777777777777778,
+    0.0002777777777777778
+  ],
+  "bounds": [
+    -121.00013888888888,
+    37.00013888888889,
+    -119.00013888888888,
+    39.00013888888889
+  ],
+  "nodata": null,
+  "dtype": "float32",
+  "vertical_datum": "WGS84 ellipsoid",
+  "height_reference": "ellipsoidal",
+  "area_or_point": "Area",
+  "notes": "Inventory describes the local mosaic used in the retrieval baseline. Source tile names are copied from GeoTIFF tags; original download records and distributor details were not available locally."
+}

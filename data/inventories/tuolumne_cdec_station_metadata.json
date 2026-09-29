@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "inventory_created_utc": "2026-09-29T02:17:21+00:00",
+  "path": "data/inventories/tuolumne_cdec_station_metadata.csv",
+  "source_artifact": "ch13_nisar_prelim/data/stations/cdec/tuo/track042_descending_orbit069_20251101_20260112/station_metadata/cdec_tuolumne_station_metadata.csv",
+  "source_sha256": "d8bc1ef8b5e5b0392a0ec5e42c4d70c6925a6ff83c812edae75ae336a2be824a",
+  "station_count": 8,
+  "station_ids": [
+    "DAN",
+    "SLI",
+    "TUM",
+    "HRS",
+    "WHW",
+    "PDS",
+    "KIB",
+    "TES"
+  ],
+  "fields": "Names, coordinates, elevations, and network copied from the prior local station inventory.",
+  "omitted_source_field": "use_for_reference was excluded because its prior-workflow role flag is not a Tuolumne station-membership or weighting rule.",
+  "membership": "The basin geometry and the project station inventory determine membership; no station is removed by the omitted role flag."
+}

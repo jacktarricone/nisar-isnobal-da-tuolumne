@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "downloaded_utc": "2026-09-29T02:20:32+00:00",
+  "provider": "California Department of Water Resources, CDEC",
+  "endpoint": "https://cdec.water.ca.gov/dynamicapp/req/CSVDataServlet",
+  "query_url": "https://cdec.water.ca.gov/dynamicapp/req/CSVDataServlet?Stations=DAN%2CSLI%2CTUM%2CHRS%2CWHW%2CPDS%2CKIB%2CTES&SensorNums=3&dur_code=D&Start=2025-10-01&End=2026-09-28",
+  "query": {
+    "station_ids": [
+      "DAN",
+      "SLI",
+      "TUM",
+      "HRS",
+      "WHW",
+      "PDS",
+      "KIB",
+      "TES"
+    ],
+    "start_date_inclusive": "2025-10-01",
+    "end_date_inclusive": "2026-09-28",
+    "duration": "D",
+    "sensor_number": 3,
+    "sensor_type": "SNOW WC"
+  },
+  "station_metadata_path": "data/inventories/tuolumne_cdec_station_metadata.csv",
+  "station_metadata_sha256": "e0ef2825b3c79805291795caf1e6008b5bd22a0a54e96911f16f11e9ac7e57ee",
+  "raw_csv_path": "data/external/cdec/tuolumne/2025-10-01_to_2026-09-28/cdec_swe_daily_raw.csv",
+  "raw_csv_sha256": "7f0e5a611d4c3a0e63f185083321c8034eb60b484d2126b4d57261426ddb378f",
+  "raw_csv_bytes": 150589,
+  "normalized_csv_path": "data/external/cdec/tuolumne/2025-10-01_to_2026-09-28/cdec_tuolumne_swe_daily_cm.csv",
+  "normalized_csv_sha256": "36c05d0b16ccd99394cb4b8a7d55d13cb48830b6d9a45485436220eec54decc1",
+  "normalized_rows": 2541,
+  "normalization": {
+    "source_units": "INCHES as reported by CDEC",
+    "output_units": "cm",
+    "conversion": "source value multiplied by 2.54",
+    "missing_values": "non-numeric source values remain blank; no filling",
+    "data_flags": "preserved; no flag-based filtering"
+  },
+  "per_station": {
+    "DAN": {
+      "returned_rows": 363,
+      "numeric_rows": 348,
+      "non_numeric_value_rows": 15,
+      "flagged_rows": 0,
+      "first_reported_date": "2025-10-01",
+      "last_reported_date": "2026-09-28",
+      "first_numeric_date": "2025-10-01",
+      "last_numeric_date": "2026-09-28"
+    },
+    "SLI": {
+      "returned_rows": 363,
+      "numeric_rows": 362,
+      "non_numeric_value_rows": 1,
+      "flagged_rows": 0,
+      "first_reported_date": "2025-10-01",
+      "last_reported_date": "2026-09-28",
+      "first_numeric_date": "2025-10-01",
+      "last_numeric_date": "2026-09-28"
+    },
+    "TUM": {
+      "returned_rows": 363,
+      "numeric_rows": 346,
+      "non_numeric_value_rows": 17,
+      "flagged_rows": 0,
+      "first_reported_date": "2025-10-01",
+      "last_reported_date": "2026-09-28",
+      "first_numeric_date": "2025-10-01",
+      "last_numeric_date": "2026-09-28"
+    },
+    "HRS": {
+      "returned_rows": 363,
+      "numeric_rows": 357,
+      "non_numeric_value_rows": 6,
+      "flagged_rows": 0,
+      "first_reported_date": "2025-10-01",
+      "last_reported_date": "2026-09-28",
+      "first_numeric_date": "2025-10-01",
+      "last_numeric_date": "2026-09-28"
+    },
+    "WHW": {
+      "returned_rows": 363,
+      "numeric_rows": 362,
+      "non_numeric_value_rows": 1,
+      "flagged_rows": 0,
+      "first_reported_date": "2025-10-01",
+      "last_reported_date": "2026-09-28",
+      "first_numeric_date": "2025-10-01",
+      "last_numeric_date": "2026-09-28"
+    },
+    "PDS": {
+      "returned_rows": 363,
+      "numeric_rows": 362,
+      "non_numeric_value_rows": 1,
+      "flagged_rows": 0,
+      "first_reported_date": "2025-10-01",
+      "last_reported_date": "2026-09-28",
+      "first_numeric_date": "2025-10-01",
+      "last_numeric_date": "2026-09-28"
+    },
+    "KIB": {
+      "returned_rows": 363,
+      "numeric_rows": 255,
+      "non_numeric_value_rows": 108,
+      "flagged_rows": 0,
+      "first_reported_date": "2025-10-01",
+      "last_reported_date": "2026-09-28",
+      "first_numeric_date": "2025-10-01",
+      "last_numeric_date": "2026-06-12"
+    },
+    "TES": {
+      "returned_rows": 0,
+      "numeric_rows": 0,
+      "non_numeric_value_rows": 0,
+      "flagged_rows": 0,
+      "first_reported_date": null,
+      "last_reported_date": null,
+      "first_numeric_date": null,
+      "last_numeric_date": null
+    }
+  }
+}

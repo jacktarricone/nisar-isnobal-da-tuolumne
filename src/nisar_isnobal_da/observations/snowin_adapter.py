@@ -12,6 +12,7 @@ from math import isfinite
 from numbers import Real
 from typing import Any
 
+import numpy as np
 import xarray as xr
 
 _CANONICAL_PHASE = "secondary_minus_reference"
@@ -89,6 +90,26 @@ def _require_alignment(pair: xr.Dataset, name: str, reference: xr.DataArray) -> 
         xr.align(reference, variable, join="exact", copy=False)
     except ValueError as exc:
         raise SnowInObservationError(f"{name} coordinates must match dswe") from exc
+
+
+def _boolean_support(pair: xr.Dataset, name: str) -> xr.DataArray:
+    """Read boolean support, including its explicit NetCDF flag encoding."""
+    variable = pair[name]
+    if variable.dtype.kind == "b":
+        return variable
+
+    flag_values = np.asarray(variable.attrs.get("flag_values", [])).tolist()
+    if (
+        variable.dtype.kind in "iu"
+        and flag_values == [0, 1]
+        and variable.attrs.get("flag_meanings") == "unsupported supported"
+        and np.isin(np.asarray(variable.data), [0, 1]).all()
+    ):
+        return variable.astype(bool)
+
+    raise SnowInObservationError(
+        f"{name} must be boolean or an explicitly encoded 0/1 support flag"
+    )
 
 
 def adapt_snowin_observation(
@@ -224,13 +245,10 @@ def adapt_snowin_observation(
 
     if "pairwise_supported" in pair and "observation_support" not in pair:
         _require_alignment(pair, "pairwise_supported", dswe)
-        if pair["pairwise_supported"].dtype.kind != "b":
-            raise SnowInObservationError("pairwise_supported must be boolean")
-        result["observation_support"] = pair["pairwise_supported"]
+        result["observation_support"] = _boolean_support(pair, "pairwise_supported")
     if "observation_support" in pair:
         _require_alignment(pair, "observation_support", dswe)
-        if pair["observation_support"].dtype.kind != "b":
-            raise SnowInObservationError("observation_support must be boolean")
+        result["observation_support"] = _boolean_support(pair, "observation_support")
 
     return result
 
@@ -284,8 +302,7 @@ def validate_da_observation(observation: xr.Dataset) -> None:
         raise SnowInObservationError("dswe must be pairwise_dSWE with units 'm'")
     if dswe.attrs.get("phase_difference_definition") != _CANONICAL_PHASE:
         raise SnowInObservationError("dswe must declare the canonical phase direction")
-    if observation["observation_support"].dtype.kind != "b":
-        raise SnowInObservationError("observation_support must be boolean")
+    _boolean_support(observation, "observation_support")
     _require_alignment(observation, "observation_support", dswe)
 
     for name in required_attrs:
