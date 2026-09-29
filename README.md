@@ -115,12 +115,18 @@ by the cutoff (16 T042/F069 and 15 T034/F021). The later T042/F069 segment is
 excluded. VIIRS snow masks are shown only as downstream support diagnostics; they
 do not filter the retrieval. Each ASO SWE raster is preserved at source and also
 area-averaged from its 50 m source grid to the shared 80 m NISAR grid for spatial
-context. ASO absolute SWE is not compared directly with segment-relative cumulative
-dSWE. Diverging dSWE maps use red for negative values and blue for positive values.
+alignment. A separate ERB–GRL-style diagnostic compares ASO total SWE with the
+nearest cumulative NISAR dSWE endpoint for each survey, frame, and reference
+method, on common VIIRS snow support. That comparison is conditional on near-zero
+SWE at the NISAR path start and is not absolute-SWE validation. Diverging dSWE
+maps use red for negative values and blue for positive values.
 The comparison also recalculates full pairwise dSWE rasters and connected
 cumulative paths using the current equal-weight median, a coherence-weighted
 mean, and the maximum and minimum eligible station residuals. It writes three
 method comparison tables and two comparison figures, including endpoint maps.
+An ERB–GRL-style downstream comparison evaluates each cumulative reference
+method at all three ASO surveys on common VIIRS snow support. It is descriptive
+and conditional on near-zero SWE at each NISAR path start.
 
 After preparing the GUNW and NISAR COP30 DEM paths used on your system, run:
 
@@ -137,6 +143,16 @@ manifest, three ASO GeoTIFFs on the common NISAR grid, and ten PNG/PDF figure
 pairs under `data/derived/tuolumne_retrieval_baseline/`. See the [baseline method
 note](docs/TUOLUMNE_RETRIEVAL_BASELINE.md) for conventions, limitations, and the
 current result summary.
+
+After that baseline run, construct the ASO comparisons with:
+
+```bash
+python scripts/analysis/tuolumne_aso_reference_comparison.py
+```
+
+This writes 24 ASO/NISAR difference rasters, one shared-support raster for each
+survey/frame, a 24-row metrics table, and four PNG/PDF figures beneath
+`data/derived/tuolumne_retrieval_baseline/aso_reference_comparison/`.
 
 ## Project contracts
 

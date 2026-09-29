@@ -111,9 +111,50 @@ This follows the charter's ASO preparation requirements (§7) and the ERB
 area-average precedent; source and destination transforms, CRS, shape, units,
 resampling, and source checksum are recorded. Derived GeoTIFFs are written under
 `data/derived/tuolumne_retrieval_baseline/aso_on_nisar_grid/`. Figure 8 shows
-these aligned layers with a shared colour scale. This spatial alignment does not
-resolve absolute-SWE initialization: there is no pixelwise accuracy comparison to
-cumulative ΔSWE.
+these aligned layers with a shared colour scale.
+
+## ASO endpoint comparison
+
+The follow-on `tuolumne_aso_reference_comparison.py` applies the ERB–GRL
+endpoint-evaluation pattern to all three ASO dates, both NISAR frames, and all
+four reference methods. For each multi-day survey it uses the floor-calendar
+midpoint, selects the nearest actual cumulative NISAR endpoint and nearest
+available VIIRS date, and performs no temporal interpolation. The selected
+endpoints are T042/T034: 2026-01-24 (−7 d) / 2026-02-04 (+4 d) for the Jan survey;
+2026-03-01 (+2 d) / 2026-02-28 (+1 d) for February; and 2026-04-06 (0 d) /
+2026-04-05 (−1 d) for April. VIIRS support dates are 2026-02-04, 2026-02-28, and
+2026-04-06, respectively.
+
+The shared support for each survey/frame is the basin, finite area-averaged ASO,
+finite cumulative dSWE for all four methods, and finite VIIRS fSCA > 0. Thus the
+four method comparisons for a survey/frame use the same pixels. The output
+includes 24 NISAR-minus-ASO difference GeoTIFFs, six support rasters, a 24-row
+metrics table, and four figures beneath
+`data/derived/tuolumne_retrieval_baseline/aso_reference_comparison/`. Metrics
+follow the ERB–GRL endpoint calculation: bias, MAE, RMSE, ubRMSE, normalized
+RMSE, median error, Pearson correlation, regression, coverage, and descriptive
+volume summaries.
+
+Because ASO is total SWE while NISAR is segment-relative cumulative dSWE, reading
+their difference as an absolute-SWE error depends on near-zero SWE at the NISAR
+path start. The comparison does not establish absolute-SWE accuracy, and no
+reference method is selected using ASO. The MAE (NISAR cumulative dSWE versus ASO
+total SWE, mm) is:
+
+| ASO survey | Frame (nearest NISAR endpoint) | Median | Coherence-weighted mean | Maximum station | Minimum station |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Jan 31–Feb 1 | T042/F069 (Jan 24) | 135 | 133 | 399 | 369 |
+| Jan 31–Feb 1 | T034/F021 (Feb 4) | 141 | 140 | 311 | 385 |
+| Feb 27–28 | T042/F069 (Mar 1) | 224 | 204 | 383 | 555 |
+| Feb 27–28 | T034/F021 (Feb 28) | 218 | 229 | 248 | 686 |
+| Apr 6 | T042/F069 (Apr 6) | 175 | 172 | 876 | 659 |
+| Apr 6 | T034/F021 (Apr 5) | 182 | 175 | 712 | 714 |
+
+The coherence-weighted mean is close to the median for these endpoint MAEs; the
+extreme station references often produce much larger errors. Pearson
+correlations are weak overall (maximum 0.44 across the 24 comparisons). These
+descriptive results use spatially dependent pixels and are not independent
+validation.
 
 The station residuals set the phase reference and therefore are calibration data,
 not independent validation. Pairwise coverage is 0.99796–0.99988. Per-edge median

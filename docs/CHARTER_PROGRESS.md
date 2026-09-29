@@ -11,7 +11,7 @@ charter](PROJECT_CHARTER.md) and [retrieval baseline note](TUOLUMNE_RETRIEVAL_BA
 | Charter section | Current status |
 | --- | --- |
 | §§1–6, 15–17, 19, 21, 23–24 | Project purpose, hypotheses, experiment sequence, architecture, and roles remain design contracts. The M3 public-repository review is recorded in §15; no proprietary implementation is inferred. |
-| §7 | Three ASO packages are inventoried. Source SWE rasters are preserved; a separate area-average representation is generated on the shared NISAR grid. It is spatial context, not an absolute-SWE validation result. |
+| §7 | Three ASO packages are inventoried and area-averaged onto the shared NISAR grid. All three surveys are now compared with nearest cumulative endpoints for both frames and all four reference methods, on common VIIRS snow support. This is a descriptive cross-quantity comparison, not independent absolute-SWE validation. |
 | §§8–10 | Separate BETA and PROVISIONAL CMR snapshots, resumable NISAR downloader, and raw GUNW validator are present. The baseline filters the 48-product primary-frame inventory to 31 pairs ending by 2026-06-01 and compares four phase-reference aggregations on common support. Catalog metadata and local validation evidence remain distinct. |
 | §11 | A representative saved SnowIn-normalized pair is routed through the project adapter. Support survives the NetCDF 0/1 flag encoding as boolean. DA readiness still fails correctly because uncertainty fields are absent. |
 | §18 | The generated external-data manifest covers ASO and NISAR records plus the available CDEC, VIIRS, basin-boundary, and DEM records. The DEM distributor/download provenance is not in local metadata and is explicitly unresolved. |
@@ -31,6 +31,14 @@ tables and two figures. It records station residuals and map changes versus the
 median reference. The coherence-weighted mean produces much smaller map changes
 than the max/min station-residual bounds; the comparison does not select a
 preferred method or establish independent retrieval accuracy.
+
+The downstream ASO comparison follows the ERB–GRL endpoint metrics and writes
+24 method/frame/survey difference rasters, a shared-support raster per
+frame/survey, a metrics table, and four figures. It selects the nearest actual
+NISAR endpoint to each ASO survey midpoint without temporal interpolation and
+uses the nearest VIIRS product's fSCA > 0 support. Comparing segment-relative
+cumulative dSWE with ASO total SWE assumes the NISAR path-start SWE was near zero;
+metrics remain descriptive, with no reference method selected using ASO.
 
 ## Remaining research and partner decisions
 
