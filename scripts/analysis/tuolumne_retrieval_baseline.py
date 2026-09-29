@@ -71,6 +71,25 @@ VIIRS_FSCA_INTERCEPT = -0.01
 VIIRS_FSCA_SLOPE = 1.45
 VIIRS_THRESHOLD = 0.50
 GRID_CRS = "EPSG:32610"
+ANALYSIS_END_DATE = "2026-06-01"
+REFERENCE_METHODS = (
+    "median",
+    "coherence_weighted_mean",
+    "max_station",
+    "min_station",
+)
+REFERENCE_METHOD_LABELS = {
+    "median": "Equal-weight median",
+    "coherence_weighted_mean": "Coherence-weighted mean",
+    "max_station": "Maximum station residual",
+    "min_station": "Minimum station residual",
+}
+REFERENCE_METHOD_COLORS = {
+    "median": "#3b528b",
+    "coherence_weighted_mean": "#21918c",
+    "max_station": "#e07a1f",
+    "min_station": "#cc4778",
+}
 
 
 def _sha256(path: Path) -> str:
@@ -210,7 +229,8 @@ def _load_stations() -> tuple[
     stations = _read_csv(STATION_METADATA)
     daily: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
     for row in _read_csv(STATION_DAILY):
-        daily[row["station_id"]][row["date"]] = row
+        if row["date"] <= ANALYSIS_END_DATE:
+            daily[row["station_id"]][row["date"]] = row
     return stations, daily
 
 
@@ -229,6 +249,7 @@ def _load_catalog() -> dict[str, dict[str, Any]]:
                     "collection_version": granule["collection_version"],
                     "checksum_md5": item.get("Checksum", {}).get("Value"),
                     "size_bytes": item.get("SizeInBytes"),
+                    "acquisition_end": granule.get("acquisition_end"),
                 }
     return result
 
@@ -238,13 +259,19 @@ def _products(
 ) -> dict[str, list[Path]]:
     output: dict[str, list[Path]] = {}
     for frame in frames:
-        expected = {name for name in catalog if f"_{frame[1:4]}_" in name}
-        # Frame number alone is not unique in the catalog, so use the explicit
-        # track, orbit direction, and frame fields encoded in the GUNW name.
         if frame == "T042_F069":
-            expected = {name for name in catalog if "_042_D_069_" in name}
+            frame_marker = "_042_D_069_"
         elif frame == "T034_F021":
-            expected = {name for name in catalog if "_034_A_021_" in name}
+            frame_marker = "_034_A_021_"
+        else:
+            raise ValueError(f"unsupported frame: {frame}")
+        # Track, orbit direction, and frame together identify the catalog path.
+        inventory_names = {name for name in catalog if frame_marker in name}
+        expected = {
+            name
+            for name in inventory_names
+            if catalog[name]["acquisition_end"][:10] <= ANALYSIS_END_DATE
+        }
         frame_dir = gunw_root / frame
         found = {
             path.name: path
@@ -252,13 +279,15 @@ def _products(
             if not path.name.endswith("_QA_STATS.h5")
         }
         missing = sorted(expected - found.keys())
-        extra = sorted(found.keys() - expected)
-        if missing or extra:
+        unknown = sorted(found.keys() - inventory_names)
+        if missing or unknown:
             raise FileNotFoundError(
                 f"{frame} products differ from the tracked inventory: "
-                f"missing={len(missing)}, extra={len(extra)}"
+                f"missing_through_cutoff={len(missing)}, unknown={len(unknown)}"
             )
-        output[frame] = sorted(found.values(), key=lambda path: path.name)
+        output[frame] = sorted(
+            (found[name] for name in expected), key=lambda path: path.name
+        )
     return output
 
 
@@ -401,6 +430,199 @@ def _station_reference(
             f"No eligible station residuals for {reference_date} to {secondary_date}"
         )
     return float(np.median(eligible_residuals)), rows
+
+
+def _reference_method_offsets(
+    station_reference_rows: list[dict[str, Any]],
+) -> dict[str, float]:
+    eligible = [
+        row
+        for row in station_reference_rows
+        if row["eligible"] and np.isfinite(row["residual_rad"])
+    ]
+    if not eligible:
+        raise ValueError("cannot compare reference methods without eligible stations")
+    residuals = np.asarray([row["residual_rad"] for row in eligible], dtype=float)
+    coherences = np.asarray(
+        [row["coherence_median_native_5x5"] for row in eligible], dtype=float
+    )
+    if not np.isfinite(coherences).all() or np.any(coherences <= 0.0):
+        raise ValueError(
+            "eligible station coherence weights must be finite and positive"
+        )
+    total_coherence = float(coherences.sum())
+    return {
+        "median": float(np.median(residuals)),
+        "coherence_weighted_mean": float(
+            np.sum(coherences * residuals) / total_coherence
+        ),
+        "max_station": float(np.max(residuals)),
+        "min_station": float(np.min(residuals)),
+    }
+
+
+def _reference_method_comparison(
+    pair_path: Path, frame: str, output_dir: Path
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Write four pairwise dSWE rasters using identical input support."""
+    with xr.open_dataset(pair_path, engine="h5netcdf") as opened:
+        pair = opened.load()
+    try:
+        station_reference_rows = json.loads(
+            pair.attrs.get("station_reference_rows_json", "[]")
+        )
+        offsets = _reference_method_offsets(station_reference_rows)
+        reference_time = str(pair.attrs["reference_time"])
+        secondary_time = str(pair.attrs["secondary_time"])
+        source_granule_id = str(pair.attrs["source_granule_id"])
+        wavelength = float(pair.attrs["wavelength_m"])
+        basin = np.asarray(pair["basin_mask"].data, dtype=bool)
+        median_values = np.asarray(pair["dswe"].data, dtype=float) * 1000.0
+        valid_baseline = basin & np.isfinite(median_values)
+        x = pair.x
+        y = pair.y
+        edge_rows: list[dict[str, Any]] = []
+        for method in REFERENCE_METHODS:
+            offset = offsets[method]
+            method_dswe = (
+                np.asarray(
+                    compute_dswe(
+                        pair["phase"] - offset,
+                        pair["incidence_angle"],
+                        wavelength_m=wavelength,
+                    ).data,
+                    dtype=float,
+                )
+                * 1000.0
+            )
+            valid = valid_baseline & np.isfinite(method_dswe)
+            values = method_dswe[valid]
+            shifts = method_dswe[valid] - median_values[valid]
+            method_pair_path = (
+                output_dir
+                / "reference_sensitivity"
+                / "pairs"
+                / method
+                / frame
+                / f"{pair_path.stem}.nc"
+            )
+            method_pair = xr.Dataset(
+                {
+                    "dswe": (
+                        ("y", "x"),
+                        np.where(valid, method_dswe / 1000.0, np.nan).astype("float32"),
+                    ),
+                },
+                coords={"x": x, "y": y},
+                attrs={
+                    "frame": frame,
+                    "source_granule_id": source_granule_id,
+                    "reference_time": reference_time,
+                    "secondary_time": secondary_time,
+                    "temporal_edge": "reference_to_secondary",
+                    "reference_method": method,
+                    "reference_method_label": REFERENCE_METHOD_LABELS[method],
+                    "reference_offset_rad": offset,
+                    "quantity": "pairwise_dSWE",
+                    "absolute_swe": "false",
+                },
+            )
+            method_pair["pairwise_supported"] = xr.DataArray(
+                valid.astype(bool), dims=("y", "x"), coords={"y": y, "x": x}
+            )
+            method_pair["dswe"].attrs.update(
+                {
+                    "units": "m",
+                    "quantity": "pairwise_dSWE",
+                    "phase_difference_definition": "secondary_minus_reference",
+                    "reference_method": method,
+                    "reference_offset_rad": offset,
+                }
+            )
+            method_pair["pairwise_supported"].attrs["meaning"] = (
+                "finite pairwise dSWE support inside the basin mask"
+            )
+            method_pair["basin_mask"] = xr.DataArray(
+                basin.astype("uint8"), dims=("y", "x"), coords={"y": y, "x": x}
+            )
+            _write_netcdf(method_pair, method_pair_path)
+            method_pair.close()
+            edge_rows.append(
+                {
+                    "frame": frame,
+                    "source_granule_id": source_granule_id,
+                    "reference_time": reference_time,
+                    "secondary_time": secondary_time,
+                    "reference_method": method,
+                    "reference_method_label": REFERENCE_METHOD_LABELS[method],
+                    "reference_offset_rad": offset,
+                    "offset_shift_from_median_rad": offset - offsets["median"],
+                    "pairwise_raster_path": str(method_pair_path),
+                    "eligible_station_count": len(
+                        [row for row in station_reference_rows if row["eligible"]]
+                    ),
+                    "pairwise_coverage_fraction": float(values.size / basin.sum()),
+                    "pairwise_dswe_median_mm": float(np.median(values))
+                    if values.size
+                    else np.nan,
+                    "pairwise_dswe_p25_mm": float(np.percentile(values, 25))
+                    if values.size
+                    else np.nan,
+                    "pairwise_dswe_p75_mm": float(np.percentile(values, 75))
+                    if values.size
+                    else np.nan,
+                    "median_dswe_shift_from_median_mm": float(np.median(shifts))
+                    if shifts.size
+                    else np.nan,
+                    "mean_absolute_dswe_shift_from_median_mm": float(
+                        np.mean(np.abs(shifts))
+                    )
+                    if shifts.size
+                    else np.nan,
+                    "p95_absolute_dswe_shift_from_median_mm": float(
+                        np.percentile(np.abs(shifts), 95)
+                    )
+                    if shifts.size
+                    else np.nan,
+                }
+            )
+
+        station_rows: list[dict[str, Any]] = []
+        for row in station_reference_rows:
+            residual = float(row["residual_rad"])
+            incidence = float(row["incidence_angle_center_rad"])
+            sensitivity = (
+                2.0 * math.pi * (1.59 + incidence**2.5) / wavelength / 1000.0
+                if np.isfinite(incidence) and incidence > 0.0
+                else np.nan
+            )
+            station_result = {
+                "frame": frame,
+                "source_granule_id": source_granule_id,
+                "reference_time": reference_time,
+                "secondary_time": secondary_time,
+                "station_id": row["station_id"],
+                "station_name": row["station_name"],
+                "eligible": row["eligible"],
+                "eligibility_reason": row["reason"],
+                "coherence_weight": row["coherence_median_native_5x5"],
+                "station_phase_residual_before_reference_rad": residual,
+            }
+            for method in REFERENCE_METHODS:
+                method_residual = residual - offsets[method]
+                station_result[f"reference_offset_{method}_rad"] = offsets[method]
+                station_result[f"station_residual_after_{method}_rad"] = (
+                    method_residual if row["eligible"] else np.nan
+                )
+                station_result[f"station_residual_after_{method}_mm"] = (
+                    method_residual / sensitivity
+                    if row["eligible"] and np.isfinite(sensitivity) and sensitivity > 0
+                    else np.nan
+                )
+            station_rows.append(station_result)
+        return edge_rows, station_rows
+    finally:
+        pair.close()
 
 
 def _mask_for_pair(pair: xr.Dataset, boundary: Any) -> np.ndarray:
@@ -851,6 +1073,210 @@ def _cumulative_paths(
     return summary, segment_notes
 
 
+def _cumulative_reference_method_paths(
+    reference_rows: list[dict[str, Any]],
+    baseline_cumulative_rows: list[dict[str, Any]],
+    output_dir: Path,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Accumulate each reference method and compare every endpoint to median."""
+    baseline_paths = {
+        (row["frame"], row["secondary_time"]): Path(row["cumulative_dswe_path"])
+        for row in baseline_cumulative_rows
+    }
+    summary_rows: list[dict[str, Any]] = []
+    segment_notes: list[dict[str, Any]] = []
+    for method in REFERENCE_METHODS:
+        for frame in FRAME_NAMES:
+            records = sorted(
+                (
+                    row
+                    for row in reference_rows
+                    if row["reference_method"] == method and row["frame"] == frame
+                ),
+                key=lambda row: row["reference_time"],
+            )
+            segments: list[list[dict[str, Any]]] = []
+            for record in records:
+                if (
+                    not segments
+                    or record["reference_time"] != segments[-1][-1]["secondary_time"]
+                ):
+                    segments.append([])
+                segments[-1].append(record)
+
+            for segment_number, segment in enumerate(segments, start=1):
+                anchor = segment[0]["reference_time"]
+                opened_edges: list[xr.Dataset] = []
+                try:
+                    for record in segment:
+                        pair = xr.open_dataset(
+                            record["pairwise_raster_path"], engine="h5netcdf"
+                        ).load()
+                        pair["pairwise_supported"] = pair["pairwise_supported"].astype(
+                            bool
+                        )
+                        opened_edges.append(pair)
+                    cumulative = accumulate_dswe(
+                        opened_edges,
+                        dswe_variable="dswe",
+                        initial_time=anchor,
+                    )
+                    template = opened_edges[0]
+                    basin = np.asarray(template["basin_mask"].data, dtype=bool)
+                    for index, record in enumerate(segment):
+                        cumulative_mm = (
+                            np.asarray(
+                                cumulative["cumulative_dswe"].isel(time=index).data,
+                                dtype=np.float32,
+                            )
+                            * 1000.0
+                        )
+                        support = np.asarray(
+                            cumulative["temporal_path_supported"].isel(time=index).data,
+                            dtype=bool,
+                        )
+                        output_path = (
+                            output_dir
+                            / "reference_sensitivity"
+                            / "cumulative"
+                            / method
+                            / frame
+                            / (
+                                f"segment{segment_number:02d}_"
+                                f"{Path(record['pairwise_raster_path']).stem}.nc"
+                            )
+                        )
+                        result = xr.Dataset(
+                            {
+                                "cumulative_dswe_mm": (
+                                    ("y", "x"),
+                                    cumulative_mm,
+                                ),
+                                "temporal_path_supported": (
+                                    ("y", "x"),
+                                    support.astype("uint8"),
+                                ),
+                                "basin_mask": template["basin_mask"],
+                            },
+                            coords={"x": template.x, "y": template.y},
+                            attrs={
+                                "frame": frame,
+                                "reference_method": method,
+                                "segment_number": segment_number,
+                                "segment_start_time": anchor,
+                                "reference_time": record["reference_time"],
+                                "secondary_time": record["secondary_time"],
+                                "source_pair": Path(
+                                    record["pairwise_raster_path"]
+                                ).name,
+                                "quantity": (
+                                    "cumulative_dSWE_within_connected_temporal_segment"
+                                ),
+                                "units": "mm",
+                                "absolute_swe": "false",
+                                "accumulator": "snowin.temporal.accumulate_dswe",
+                            },
+                        )
+                        result["cumulative_dswe_mm"].attrs.update(
+                            {"units": "mm", "quantity": "cumulative_dSWE"}
+                        )
+                        result["temporal_path_supported"].attrs["meaning"] = (
+                            "all edges since segment start supported"
+                        )
+                        _write_netcdf(result, output_path)
+                        result.close()
+
+                        valid = basin & support & np.isfinite(cumulative_mm)
+                        values = cumulative_mm[valid]
+                        baseline_path = baseline_paths[
+                            (frame, record["secondary_time"])
+                        ]
+                        with xr.open_dataset(
+                            baseline_path, engine="h5netcdf"
+                        ) as baseline_opened:
+                            baseline = baseline_opened.load()
+                        try:
+                            baseline_values = np.asarray(
+                                baseline["cumulative_dswe_mm"].data, dtype=float
+                            )
+                            baseline_support = np.asarray(
+                                baseline["temporal_path_supported"].data, dtype=bool
+                            )
+                            common = (
+                                basin
+                                & support
+                                & baseline_support
+                                & np.isfinite(cumulative_mm)
+                                & np.isfinite(baseline_values)
+                            )
+                            shifts = cumulative_mm[common] - baseline_values[common]
+                        finally:
+                            baseline.close()
+                        summary_rows.append(
+                            {
+                                "frame": frame,
+                                "source_granule_id": record["source_granule_id"],
+                                "reference_method": method,
+                                "reference_method_label": REFERENCE_METHOD_LABELS[
+                                    method
+                                ],
+                                "segment_number": segment_number,
+                                "segment_start_time": anchor,
+                                "reference_time": record["reference_time"],
+                                "secondary_time": record["secondary_time"],
+                                "cumulative_raster_path": str(output_path),
+                                "basin_pixel_count": int(basin.sum()),
+                                "cumulative_supported_pixel_count": int(values.size),
+                                "cumulative_coverage_fraction": float(
+                                    values.size / basin.sum()
+                                ),
+                                "cumulative_dswe_median_mm": float(np.median(values))
+                                if values.size
+                                else np.nan,
+                                "cumulative_dswe_p25_mm": float(
+                                    np.percentile(values, 25)
+                                )
+                                if values.size
+                                else np.nan,
+                                "cumulative_dswe_p75_mm": float(
+                                    np.percentile(values, 75)
+                                )
+                                if values.size
+                                else np.nan,
+                                "median_cumulative_shift_from_median_mm": float(
+                                    np.median(shifts)
+                                )
+                                if shifts.size
+                                else np.nan,
+                                "mean_absolute_cumulative_shift_from_median_mm": float(
+                                    np.mean(np.abs(shifts))
+                                )
+                                if shifts.size
+                                else np.nan,
+                                "p95_absolute_cumulative_shift_from_median_mm": float(
+                                    np.percentile(np.abs(shifts), 95)
+                                )
+                                if shifts.size
+                                else np.nan,
+                            }
+                        )
+                finally:
+                    for pair in opened_edges:
+                        pair.close()
+                segment_notes.append(
+                    {
+                        "frame": frame,
+                        "reference_method": method,
+                        "segment_number": segment_number,
+                        "segment_start_time": anchor,
+                        "segment_end_time": segment[-1]["secondary_time"],
+                        "edge_count": len(segment),
+                        "contiguous": True,
+                    }
+                )
+    return summary_rows, segment_notes
+
+
 def _viirs_scene(path: Path) -> tuple[np.ndarray, Any, str]:
     with h5py.File(path, "r") as source:
         raw = source[VIIRS_FIELD][...]
@@ -1244,7 +1670,7 @@ def _render_figures(
             values.append(value)
         if dates:
             ax.plot(dates, values, color=colors(index), linewidth=0.9, label=station_id)
-    ax.set_title("Daily station SWE (source values; cm)")
+    ax.set_title(f"Daily station SWE through {ANALYSIS_END_DATE} (source cm)")
     ax.set_xlabel("Date")
     ax.set_ylabel("CDEC SWE (cm)")
     ax.grid(alpha=0.25)
@@ -1311,7 +1737,7 @@ def _render_figures(
         "NISAR secondary acquisition date / daily station observation date"
     )
     axes[1].grid(alpha=0.25)
-    fig.suptitle("Strict path accumulation; gaps start a separately anchored segment")
+    fig.suptitle(f"Strict path accumulation through {ANALYSIS_END_DATE}")
     _save_figure(fig, figure_dir / "fig02_seasonal_cumulative_dswe")
     written.append("fig02_seasonal_cumulative_dswe")
 
@@ -1360,7 +1786,7 @@ def _render_figures(
             np.where(components > 0, 1, 0),
         ).astype(float)
         fields.append(np.where(basin, component_class, np.nan))
-        cmaps = ("RdBu_r", "viridis", "cividis", "Set2")
+        cmaps = ("RdBu", "viridis", "cividis", "Set2")
         vmins = (-dlimit, 0.0, 0.0, -0.5)
         vmaxs = (dlimit, 1.0, 90.0, 2.5)
         for col_index, ax in enumerate(axes[row_index]):
@@ -1382,9 +1808,11 @@ def _render_figures(
                     f"{frame}\n{str(ds.attrs['reference_time'])[:10]} → "
                     f"{str(ds.attrs['secondary_time'])[:10]}"
                 )
-            fig.colorbar(image, ax=ax, fraction=0.045, pad=0.02)
+            colorbar = fig.colorbar(image, ax=ax, fraction=0.045, pad=0.02)
+            if col_index == 0:
+                colorbar.set_label("Pairwise ΔSWE (mm)")
     fig.suptitle(
-        "Representative first-edge diagnostics; component labels are not a mask"
+        "Pairwise ΔSWE: red negative, blue positive; component labels are not a mask"
     )
     _save_figure(fig, figure_dir / "fig03_pairwise_retrieval_diagnostics")
     written.append("fig03_pairwise_retrieval_diagnostics")
@@ -1416,7 +1844,7 @@ def _render_figures(
             ax,
             np.where(valid, values, np.nan),
             ds,
-            cmap="RdBu_r",
+            cmap="RdBu",
             vmin=-endpoint_limit,
             vmax=endpoint_limit,
         )
@@ -1427,9 +1855,14 @@ def _render_figures(
         )
         ax.set_xticks([])
         ax.set_yticks([])
-        fig.colorbar(image, ax=ax, label="Cumulative ΔSWE (mm)")
+        fig.colorbar(
+            image,
+            ax=ax,
+            label="Cumulative ΔSWE (mm)",
+        )
     fig.suptitle(
-        "Latest connected segment per frame; different anchors, not absolute SWE"
+        "Latest connected segment per frame; red negative, blue positive; "
+        "not absolute SWE"
     )
     _save_figure(fig, figure_dir / "fig04_latest_cumulative_dswe_maps")
     written.append("fig04_latest_cumulative_dswe_maps")
@@ -1651,6 +2084,264 @@ def _render_figures(
     return written
 
 
+def _render_reference_method_figure(
+    output_dir: Path,
+    edge_rows: list[dict[str, Any]],
+    station_rows: list[dict[str, Any]],
+    stations: list[dict[str, str]],
+) -> str:
+    """Plot method offsets, pairwise dSWE shifts, and station residuals."""
+    figure_dir = output_dir / "figures"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(3, 2, figsize=(15, 12))
+    for column, frame in enumerate(FRAME_NAMES):
+        frame_edges = sorted(
+            (row for row in edge_rows if row["frame"] == frame),
+            key=lambda row: row["secondary_time"],
+        )
+        for method in REFERENCE_METHODS:
+            rows = [row for row in frame_edges if row["reference_method"] == method]
+            dates = [np.datetime64(row["secondary_time"][:10]) for row in rows]
+            color = REFERENCE_METHOD_COLORS[method]
+            axes[0, column].plot(
+                dates,
+                [row["reference_offset_rad"] for row in rows],
+                marker="o",
+                markersize=2.5,
+                linewidth=1.0,
+                color=color,
+                label=REFERENCE_METHOD_LABELS[method],
+            )
+            axes[1, column].plot(
+                dates,
+                [row["median_dswe_shift_from_median_mm"] for row in rows],
+                marker="o",
+                markersize=2.5,
+                linewidth=1.0,
+                color=color,
+                label=REFERENCE_METHOD_LABELS[method],
+            )
+
+        axes[0, column].set_title(f"{frame} · phase reference offset by pair")
+        axes[0, column].set_ylabel("Reference offset (rad)")
+        axes[0, column].grid(alpha=0.25)
+        axes[1, column].axhline(0.0, color="black", linewidth=0.6)
+        axes[1, column].set_title(f"{frame} · basin median dSWE shift from median")
+        axes[1, column].set_ylabel("Median pairwise dSWE shift (mm)")
+        axes[1, column].set_xlabel("Secondary acquisition date")
+        axes[1, column].grid(alpha=0.25)
+
+        frame_station_rows = [
+            row for row in station_rows if row["frame"] == frame and row["eligible"]
+        ]
+        station_ids = [row["station_id"] for row in stations]
+        box_values: list[list[float]] = []
+        box_positions: list[float] = []
+        box_methods: list[str] = []
+        for station_index, station_id in enumerate(station_ids):
+            for method_index, method in enumerate(REFERENCE_METHODS):
+                values = [
+                    float(row[f"station_residual_after_{method}_mm"])
+                    for row in frame_station_rows
+                    if row["station_id"] == station_id
+                    and np.isfinite(row[f"station_residual_after_{method}_mm"])
+                ]
+                if values:
+                    box_values.append(values)
+                    box_positions.append(
+                        station_index
+                        + (method_index - (len(REFERENCE_METHODS) - 1) / 2) * 0.18
+                    )
+                    box_methods.append(method)
+        if box_values:
+            boxes = axes[2, column].boxplot(
+                box_values,
+                positions=box_positions,
+                widths=0.15,
+                patch_artist=True,
+                showfliers=False,
+                manage_ticks=False,
+                medianprops={"color": "black", "linewidth": 0.7},
+                whiskerprops={"linewidth": 0.7},
+                capprops={"linewidth": 0.7},
+            )
+            for box, method in zip(boxes["boxes"], box_methods, strict=True):
+                box.set_facecolor(REFERENCE_METHOD_COLORS[method])
+                box.set_alpha(0.55)
+                box.set_edgecolor(REFERENCE_METHOD_COLORS[method])
+        axes[2, column].axhline(0.0, color="black", linewidth=0.6)
+        axes[2, column].set_title(f"{frame} · station residual after reference")
+        axes[2, column].set_ylabel("SWE-equivalent residual (mm)")
+        axes[2, column].set_xticks(range(len(station_ids)), labels=station_ids)
+        axes[2, column].set_xlim(-0.5, len(station_ids) - 0.5)
+        axes[2, column].grid(axis="y", alpha=0.25)
+        axes[2, column].set_xlabel("CDEC station")
+
+    legend_handles = [
+        Patch(
+            facecolor=REFERENCE_METHOD_COLORS[method],
+            alpha=0.65,
+            label=REFERENCE_METHOD_LABELS[method],
+        )
+        for method in REFERENCE_METHODS
+    ]
+    fig.legend(
+        handles=legend_handles,
+        loc="upper center",
+        ncol=4,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.965),
+    )
+    fig.suptitle(f"Phase reference sensitivity through {ANALYSIS_END_DATE}", y=0.995)
+    fig.subplots_adjust(top=0.91, bottom=0.07, hspace=0.42, wspace=0.19)
+    name = "fig09_phase_reference_method_comparison"
+    _save_figure(fig, figure_dir / name)
+    return name
+
+
+def _render_reference_method_endpoint_maps(
+    output_dir: Path,
+    cumulative_rows: list[dict[str, Any]],
+    boundary_projected: Any,
+) -> str:
+    """Render common-scale endpoint maps for both frames and all methods."""
+    endpoint_records = []
+    for frame in FRAME_NAMES:
+        for method in REFERENCE_METHODS:
+            candidates = [
+                row
+                for row in cumulative_rows
+                if row["frame"] == frame and row["reference_method"] == method
+            ]
+            endpoint_records.append(
+                max(candidates, key=lambda row: row["secondary_time"])
+            )
+
+    endpoint_data: dict[tuple[str, str], tuple[np.ndarray, np.ndarray, xr.Dataset]] = {}
+    for record in endpoint_records:
+        with xr.open_dataset(
+            record["cumulative_raster_path"], engine="h5netcdf"
+        ) as opened:
+            ds = opened.load()
+        values = np.asarray(ds["cumulative_dswe_mm"].data, dtype=float)
+        valid = np.asarray(ds["basin_mask"].data, dtype=bool) & np.isfinite(values)
+        endpoint_data[(record["frame"], record["reference_method"])] = (
+            values,
+            valid,
+            ds,
+        )
+
+    magnitudes = np.concatenate(
+        [
+            np.abs(values[valid])
+            for values, valid, _ in endpoint_data.values()
+            if valid.any()
+        ]
+    )
+    limit = max(float(np.percentile(magnitudes, 98)), 1.0)
+    fig, axes = plt.subplots(2, 4, figsize=(16, 8.5), sharex=True, sharey=True)
+    image = None
+    for row_index, frame in enumerate(FRAME_NAMES):
+        for column_index, method in enumerate(REFERENCE_METHODS):
+            record = next(
+                row
+                for row in endpoint_records
+                if row["frame"] == frame and row["reference_method"] == method
+            )
+            values, valid, ds = endpoint_data[(frame, method)]
+            ax = axes[row_index, column_index]
+            image = _imshow(
+                ax,
+                np.where(valid, values, np.nan),
+                ds,
+                cmap="RdBu",
+                vmin=-limit,
+                vmax=limit,
+            )
+            _projected_polygon(ax, boundary_projected, linewidth=0.55)
+            ax.set_title(
+                f"{REFERENCE_METHOD_LABELS[method]}\n"
+                f"endpoint {record['secondary_time'][:10]}"
+            )
+            ax.set_xticks([])
+            ax.set_yticks([])
+            if column_index == 0:
+                ax.set_ylabel(frame)
+
+    assert image is not None
+    fig.suptitle(
+        "June 1 cutoff · red negative, blue positive · "
+        "segment-relative cumulative ΔSWE",
+        y=0.98,
+    )
+    fig.subplots_adjust(
+        left=0.04, right=0.87, top=0.86, bottom=0.06, wspace=0.08, hspace=0.3
+    )
+    colorbar_axis = fig.add_axes([0.90, 0.18, 0.018, 0.64])
+    fig.colorbar(image, cax=colorbar_axis, label="Cumulative ΔSWE (mm)")
+    name = "fig10_reference_method_endpoint_maps"
+    _save_figure(fig, output_dir / "figures" / name)
+    for _, _, ds in endpoint_data.values():
+        ds.close()
+    return name
+
+
+def _prune_unselected_outputs(
+    output_dir: Path,
+    frames: list[str],
+    pair_paths: dict[str, list[Path]],
+    cumulative_rows: list[dict[str, Any]],
+    reference_method_rows: list[dict[str, Any]],
+    cumulative_method_rows: list[dict[str, Any]],
+) -> None:
+    """Remove stale generated pair and cumulative files outside this run."""
+    for frame in frames:
+        selected_pairs = {path.resolve() for path in pair_paths[frame]}
+        pair_dir = output_dir / "pairs" / frame
+        if pair_dir.is_dir():
+            for path in pair_dir.glob("*.nc"):
+                if path.resolve() not in selected_pairs:
+                    path.unlink()
+
+        selected_cumulative = {
+            Path(row["cumulative_dswe_path"]).resolve()
+            for row in cumulative_rows
+            if row["frame"] == frame
+        }
+        cumulative_dir = output_dir / "cumulative" / frame
+        if cumulative_dir.is_dir():
+            for path in cumulative_dir.rglob("*.nc"):
+                if path.resolve() not in selected_cumulative:
+                    path.unlink()
+
+        for method in REFERENCE_METHODS:
+            method_pair_paths = {
+                Path(row["pairwise_raster_path"]).resolve()
+                for row in reference_method_rows
+                if row["frame"] == frame and row["reference_method"] == method
+            }
+            method_pair_dir = (
+                output_dir / "reference_sensitivity" / "pairs" / method / frame
+            )
+            if method_pair_dir.is_dir():
+                for path in method_pair_dir.glob("*.nc"):
+                    if path.resolve() not in method_pair_paths:
+                        path.unlink()
+
+            method_cumulative_paths = {
+                Path(row["cumulative_raster_path"]).resolve()
+                for row in cumulative_method_rows
+                if row["frame"] == frame and row["reference_method"] == method
+            }
+            method_cumulative_dir = (
+                output_dir / "reference_sensitivity" / "cumulative" / method / frame
+            )
+            if method_cumulative_dir.is_dir():
+                for path in method_cumulative_dir.rglob("*.nc"):
+                    if path.resolve() not in method_cumulative_paths:
+                        path.unlink()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1724,6 +2415,34 @@ def main() -> int:
     _write_csv(output_dir / "tables/pairwise_edge_summary.csv", edge_rows)
     _write_csv(output_dir / "tables/station_reference_rows.csv", station_reference_rows)
 
+    reference_method_rows: list[dict[str, Any]] = []
+    station_method_rows: list[dict[str, Any]] = []
+    for frame, paths in pair_paths.items():
+        for pair_path in paths:
+            edge_comparison, station_comparison = _reference_method_comparison(
+                pair_path, frame, output_dir
+            )
+            reference_method_rows.extend(edge_comparison)
+            station_method_rows.extend(station_comparison)
+    reference_method_rows.sort(
+        key=lambda row: (
+            row["frame"],
+            row["reference_time"],
+            REFERENCE_METHODS.index(row["reference_method"]),
+        )
+    )
+    station_method_rows.sort(
+        key=lambda row: (row["frame"], row["reference_time"], row["station_id"])
+    )
+    _write_csv(
+        output_dir / "tables/reference_method_comparison.csv",
+        reference_method_rows,
+    )
+    _write_csv(
+        output_dir / "tables/station_reference_method_comparison.csv",
+        station_method_rows,
+    )
+
     cumulative_rows: list[dict[str, Any]] = []
     segments: list[dict[str, Any]] = []
     for frame, paths in pair_paths.items():
@@ -1731,6 +2450,17 @@ def main() -> int:
         cumulative_rows.extend(summary)
         segments.extend(notes)
     _write_csv(output_dir / "tables/cumulative_path_summary.csv", cumulative_rows)
+    cumulative_method_rows, reference_method_segments = (
+        _cumulative_reference_method_paths(
+            reference_method_rows,
+            cumulative_rows,
+            output_dir,
+        )
+    )
+    _write_csv(
+        output_dir / "tables/cumulative_reference_method_comparison.csv",
+        cumulative_method_rows,
+    )
     viirs_summaries, viirs_display = _viirs_products(pair_paths, output_dir)
     common_grid_template = _verify_common_nisar_grid(pair_paths)
     aso_products = _prepare_aso_on_nisar_grid(
@@ -1761,9 +2491,25 @@ def main() -> int:
         boundary_projected,
         aso_products,
     )
+    figure_names.append(
+        _render_reference_method_figure(
+            output_dir,
+            reference_method_rows,
+            station_method_rows,
+            stations,
+        )
+    )
+    figure_names.append(
+        _render_reference_method_endpoint_maps(
+            output_dir,
+            cumulative_method_rows,
+            boundary_projected,
+        )
+    )
     manifest = {
         "generated_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "frames": args.frames,
+        "analysis_end_date_inclusive": ANALYSIS_END_DATE,
         "software": _software_provenance(),
         "inputs": {
             "nisar_inventory": str(NISAR_INVENTORY.relative_to(ROOT)),
@@ -1795,13 +2541,24 @@ def main() -> int:
                 "Native 5x5 phase/coherence medians; coherence > 0; exact-date CDEC; "
                 "equal-weight median of eligible basin-station residuals"
             ),
+            "reference_method_comparison": {
+                "median": "equal-weight median of eligible station phase residuals",
+                "coherence_weighted_mean": (
+                    "sum(coherence × station phase residual) / sum(coherence); "
+                    "coherence is the median of the eligible native 5x5 station window"
+                ),
+                "max_station": "maximum eligible station phase residual",
+                "min_station": "minimum eligible station phase residual",
+                "support": "same eligible station set for all four methods",
+            },
             "support": (
                 "Finite phase and valid geometry; no coherence or component mask; "
                 "basin polygon masks output dSWE"
             ),
             "temporal_path": (
                 "Contiguous segments; segment-specific reference epoch; missing "
-                "pixels propagate; gaps are not bridged"
+                "pixels propagate; gaps are not bridged; pair secondary dates "
+                f"are limited through {ANALYSIS_END_DATE}"
             ),
             "corrections": "No GUNW correction layers applied",
             "viirs": (
@@ -1818,8 +2575,12 @@ def main() -> int:
             ),
         },
         "temporal_segments": segments,
+        "reference_method_temporal_segments": reference_method_segments,
         "pair_count": len(edge_rows),
         "cumulative_endpoint_count": len(cumulative_rows),
+        "reference_method_count": len(REFERENCE_METHODS),
+        "reference_method_pair_count": len(reference_method_rows),
+        "reference_method_cumulative_endpoint_count": len(cumulative_method_rows),
         "viirs_reprojected_frame_date_count": len(viirs_summaries),
         "figures": figure_names,
         "limitations": [
@@ -1828,8 +2589,8 @@ def main() -> int:
                 "not absolute SWE"
             ),
             (
-                "T042/F069 has a noncontiguous pair gap; the later segment is "
-                "separately anchored"
+                "Analysis stops on 2026-06-01; later T042/F069 and T034/F021 "
+                "acquisitions, including the post-gap T042 segment, are excluded"
             ),
             (
                 "ASO is prepared on the common grid for spatial context; no "
@@ -1845,6 +2606,14 @@ def main() -> int:
     }
     (output_dir / "run_manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    _prune_unselected_outputs(
+        output_dir,
+        args.frames,
+        pair_paths,
+        cumulative_rows,
+        reference_method_rows,
+        cumulative_method_rows,
     )
     print(
         f"Pair products: {len(edge_rows)}; figures: {len(figure_names)}; "

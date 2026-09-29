@@ -4,7 +4,7 @@ This project will evaluate how NISAR L-band InSAR snow water equivalent change (
 
 ## Project status
 
-Stage 1 inventories, the resumable GUNW downloader, and raw-product validation are in place. The SnowIn xarray observation adapter validates already processed pairwise dSWE outputs. A separate two-frame retrieval baseline processes the 48 available T042/F069 and T034/F021 PROVISIONAL GUNWs and writes maps, tables, and figures under Git-ignored `data/derived/`. It is a reproducible retrieval diagnostic, not independent validation or a production DA workflow. The adapter does not synthesize missing support or uncertainty, and the project does not implement assimilation or model-state updates. Planned experiments remain hypotheses, not results.
+Stage 1 inventories, the resumable GUNW downloader, and raw-product validation are in place. The SnowIn xarray observation adapter validates already processed pairwise dSWE outputs. The two-frame retrieval baseline analyzes pairs ending on or before 2026-06-01 (16 T042/F069 and 15 T034/F021 pairs) and writes maps, tables, and figures under Git-ignored `data/derived/`. The later T042/F069 segment is excluded. A phase-reference sensitivity comparison applies equal-weight median, coherence-weighted mean, maximum-station, and minimum-station offsets to the same pairs and station support. The baseline remains a retrieval diagnostic, not independent validation or a production DA workflow. The adapter does not synthesize missing support or uncertainty, and the project does not implement assimilation or model-state updates. Planned experiments remain hypotheses, not results.
 
 ## Repository layout
 
@@ -108,11 +108,19 @@ provenance snapshot for a later refresh.
 The baseline script reuses SnowIn's GUNW phase normalization, product wavelength,
 local incidence, dSWE calculation, and connected-path accumulation. For each
 pair it forms an equal-weight median reference from eligible in-basin CDEC station
-residuals. VIIRS snow masks are shown only as downstream support diagnostics; they
+residuals. The analysis cutoff is 2026-06-01 inclusive, based on each pair's
+secondary acquisition date; station context is clipped to the same date. The full
+catalog snapshots remain available, while the analysis includes only pairs ending
+by the cutoff (16 T042/F069 and 15 T034/F021). The later T042/F069 segment is
+excluded. VIIRS snow masks are shown only as downstream support diagnostics; they
 do not filter the retrieval. Each ASO SWE raster is preserved at source and also
 area-averaged from its 50 m source grid to the shared 80 m NISAR grid for spatial
 context. ASO absolute SWE is not compared directly with segment-relative cumulative
-dSWE.
+dSWE. Diverging dSWE maps use red for negative values and blue for positive values.
+The comparison also recalculates full pairwise dSWE rasters and connected
+cumulative paths using the current equal-weight median, a coherence-weighted
+mean, and the maximum and minimum eligible station residuals. It writes three
+method comparison tables and two comparison figures, including endpoint maps.
 
 After preparing the GUNW and NISAR COP30 DEM paths used on your system, run:
 
@@ -125,7 +133,7 @@ python scripts/analysis/tuolumne_retrieval_baseline.py \
 
 The script also requires the tracked CDEC/VIIRS inventories and the corresponding
 local raw data. It writes NetCDF pair and cumulative fields, CSV summaries, a run
-manifest, three ASO GeoTIFFs on the common NISAR grid, and eight PNG/PDF figure
+manifest, three ASO GeoTIFFs on the common NISAR grid, and ten PNG/PDF figure
 pairs under `data/derived/tuolumne_retrieval_baseline/`. See the [baseline method
 note](docs/TUOLUMNE_RETRIEVAL_BASELINE.md) for conventions, limitations, and the
 current result summary.

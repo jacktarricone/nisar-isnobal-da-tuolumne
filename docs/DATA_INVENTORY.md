@@ -117,6 +117,7 @@ The raw response and normalized table are stored under the ignored
 `data/inventories/tuolumne_cdec_2025-10-01_to_2026-09-28.json` records endpoint,
 query bounds, checksums, row coverage, and each station's last numeric date.
 This is an observation inventory, not a reference-station selection policy.
+The retrieval baseline uses this longer source record only through 2026-06-01.
 
 ## VIIRS daily snow cover
 
